@@ -153,7 +153,7 @@ void initEnvironment()
 	CAL_CreateSphere(cal_point, 0, 0, 0, 0);
 
 	CAL_CreateGroup(&cal_ellipse, 0, false, "Ellipse");
-	CAL_SetGroupColor(cal_ellipse, 0, 0, 1.0);
+	CAL_SetGroupColor(cal_ellipse, 0, 0, 0.0, 0.4);
 
 	CAL_CreateGroup(&cal_ellipse_trunc, 0, false, "Ellipse_trunc");
 	CAL_SetGroupColor(cal_ellipse_trunc, 1, 0, 0);
@@ -235,13 +235,12 @@ int main()
 
 	LQGMP lqgmp(rrt.pathSet[0],dt, P0); 
 	double prob = lqgmp.computeProbability(P0, cal_obstacles, cal_environment, cal_point);
-	
 	lqgmp.draw_prior_distribution(cal_ellipse);
 	std::cout<<"Probablity of success (LQGMP): "<<prob<<std::endl;
 
-	double prob2 = lqgmp.computeLQGMPTruncation(P0, cal_obstacles, cal_environment, cal_point);
+	double prob2 = lqgmp.EstimateAndTruncate(P0, cal_obstacles, cal_environment, cal_point);
 	std::cout<<"Probability of success (Truncated LQGMP): "<<prob2<<std::endl;
-
+	lqgmp.draw_truncate_distribution(cal_ellipse_trunc);
 	int num;
 	std::cin>>num;
 

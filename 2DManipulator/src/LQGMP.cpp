@@ -68,10 +68,6 @@ void LQGMP::createABVLK()
 		G.insert(3,3, pathlqg[k].K);
 		pathlqg[k-1].G = G;
 		
-		Matrix<5,5> Q;
-		Q.reset();
-		Q.insert(0,0, M);
-		Q.insert(3,3, N);
 		pathlqg[k].Sigma = F * pathlqg[k-1].Sigma * ~F + G * Q * ~G;
 	}
 }
@@ -80,8 +76,7 @@ void LQGMP::createABVLK()
 
 void LQGMP::draw_prior_distribution(const int& cal_ellipse){
 
-	createABVLK();
-	for(int i = 0; i < (int)pathlqg.size(); i++){
+	for(int i = 0; i < (int)pathlqg.size(); i+=3){
 		drawEllipse3d(pathlqg[i].T, pathlqg[i].Sigma.subMatrix<3,3>(0,0), cal_ellipse, true);
 	}
 
@@ -199,6 +194,7 @@ double LQGMP::computeConfidence(const Matrix<3>& q, const Matrix<3,3>& R, const 
 	return mindis;
 }
 
+//return the probablity of success (measured by gamma function)
 double LQGMP::computeProbability(const Matrix<3,3>& initialCov, const int& cal_obstacles, const int& cal_environment, const int& cal_point)
 {
 	P0 = initialCov;
@@ -216,6 +212,7 @@ double LQGMP::computeProbability(const Matrix<3,3>& initialCov, const int& cal_o
 	return exp(log_prob);
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //this query only query for one xpos (the mostlikely-in-collision sample on the links), only query once. clone obstacles are the cloned and left obstacles.
 double LQGMP::query(const Matrix<2>& xpos, const Matrix<2,2>& xR, const int& cal_cloneobstacles, const int& cal_point, std::vector<std::pair<Matrix<2>, double>>& cvx)
 {
@@ -405,6 +402,8 @@ double LQGMP::computeLQGMPTruncation(const Matrix<3,3>& initialCov, const int& c
 	return ps;
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 
 void LQGMP::queryalldistance(const Matrix<3>& qpos, const Matrix<3,3>& qR, const int& cal_obstacles, const int& cal_environment, const int& cal_point, std::vector<informationNode>& Distance)
@@ -423,13 +422,14 @@ void LQGMP::queryalldistance(const Matrix<3>& qpos, const Matrix<3,3>& qR, const
 			Matrix<2,3> A = Joc; //A*q + c
 			Matrix<2> xmean = forward_k(qpos, link, length);
 			Matrix<2,2> xcov = A * qR * ~A; 
+			
 			Matrix<2,2> EVec, EVal;
 			jacobi(xcov, EVec, EVal);
 			Matrix<3,3> Temp = identity<3>();
 			Temp.insert(0,0, ~EVec);
 			Matrix<4,1> q = quatFromRot(Temp);
 			for(int i = 0; i < 2; i++){
-				EVal(i,i) += 0.0001;
+				EVal(i,i) += 0.00001;
 			}
 			//transform environment.
 			CAL_SetGroupQuaternion(cal_obstacles, (float) q(0,0), (float) q(1,0), (float) q(2,0), (float) q(3,0));
@@ -442,6 +442,7 @@ void LQGMP::queryalldistance(const Matrix<3>& qpos, const Matrix<3,3>& qR, const
 			Matrix<2,2> invT = !T;
 			Matrix<2> transPos =  invScale * ~EVec * xmean;
 			CAL_SetGroupPosition(cal_point, (float) transPos[0], (float) transPos[1], 0);
+			
 			int num_pairs = 0;
 			CAL_GetClosestPairs(cal_point, cal_environment, &num_pairs);
 			SCALResult* results = new SCALResult[num_pairs];
@@ -450,7 +451,7 @@ void LQGMP::queryalldistance(const Matrix<3>& qpos, const Matrix<3,3>& qR, const
 				Matrix<2> objp = zeros<2,1>(); 
 				objp[0] = results[i].vector1[0]; objp[1] = results[i].vector1[1];
 				int objid = results[i].objID1;
-				objp = invT * objp;
+				objp = invT * objp; //transform back to the original position.
 				informationNode tmpnode;
 				tmpnode.k = k;
 				tmpnode.length = length;
@@ -463,7 +464,8 @@ void LQGMP::queryalldistance(const Matrix<3>& qpos, const Matrix<3,3>& qR, const
 				Distance.push_back(tmpnode);
 			}
 			delete []results;
-
+			CAL_SetGroupQuaternion(cal_obstacles, 0,0,0,1);
+			CAL_SetGroupScaling(cal_environment, 1,1,1);
 		}
 	}
 }
@@ -479,10 +481,10 @@ int LQGMP::pick_min_dis(std::vector<informationNode>& Distance){
 			minnum = i;
 		}
 	}
-
 	return minnum;
 }
 
+//check if the contact point is pruned away or not.
 bool LQGMP::check_contact_point(const std::vector<std::pair<Matrix<2>, double>>& cvx, const Matrix<2>& objpoint)
 {
 	for(int i = 0; i < (int)cvx.size(); i++){
@@ -491,10 +493,10 @@ bool LQGMP::check_contact_point(const std::vector<std::pair<Matrix<2>, double>>&
 		if(tr(~a*objpoint) > b) //means it is already outside of the current convex region.
 			return false;
 	}
-	return true; //
+	return true; //true: the contact point is not pruned away yet.
 }
 
-
+//generate configuration space constraints.
 void LQGMP::DistanceToConstraints(const Matrix<3>& qpos, const Matrix<3,3>& qR, std::vector<std::pair<Matrix<3>, double>>& qcvx, const int& cal_obstacles, const int& cal_environment, const int& cal_point)
 {
 	std::vector<informationNode> Distances;
@@ -502,15 +504,17 @@ void LQGMP::DistanceToConstraints(const Matrix<3>& qpos, const Matrix<3,3>& qR, 
 	queryalldistance(qpos, qR, cal_obstacles, cal_environment, cal_point, Distances);
 
 	int numdis = (int)Distances.size();
-	std::cout<<numdis<<std::endl;
-
+	//std::cout<<numdis<<std::endl;
 	std::vector<std::pair<Matrix<2>, double>> cvx;
 	cvx.clear();
 	int obj_left = 3;
 	while(obj_left > 0){
 		int num = pick_min_dis(Distances);
-		if(num == -1)
+		if(num == -1){
+			cvx.clear();
+			Distances.clear();
 			return;
+		}
 
 		informationNode minnode = Distances[num];
 		bool in = check_contact_point(cvx, minnode.objpoint);
@@ -519,7 +523,7 @@ void LQGMP::DistanceToConstraints(const Matrix<3>& qpos, const Matrix<3,3>& qR, 
 			Matrix<2> op = minnode.x;
 			Matrix<2> objp = minnode.objpoint;
 			Matrix<2> a = objp - op;
-			a = a / sqrt(tr(~a*a));
+			a = a / (sqrt(tr(~a*a)) + 0.00001);
 			double b = tr(~a * objp);
 			cvx.push_back(std::make_pair(a, b));
 			Matrix<3> qa = ~(minnode.A)*a;
@@ -528,19 +532,17 @@ void LQGMP::DistanceToConstraints(const Matrix<3>& qpos, const Matrix<3,3>& qR, 
 		}
 		Distances.erase(Distances.begin() + num);
 	}
-	cvx.clear();
-	Distances.clear();
 }
 
+//return the probablity of success.
 double LQGMP::EstimateAndTruncate(const Matrix<3,3> initialCov, const int& cal_obstacles, const int& cal_environment, const int& cal_point)
 {
 	double ps = 1.0;
 	P0 = initialCov;
 	double newuniMean = 0, newuniVar = 0;
-	P0 = initialCov;
 	createABVLK();
 	int l = (int)pathlqg.size(); 
-	std::cout<<l<<std::endl;
+
 	pathlqg[0].y.reset();
 	pathlqg[0].R.reset();
 	pathlqg[0].R.insert(0,0, P0);
@@ -554,16 +556,16 @@ double LQGMP::EstimateAndTruncate(const Matrix<3,3> initialCov, const int& cal_o
 		Matrix<6,6> augcov = zeros<6,6>();
 		augcov = pathlqg[i].R;
 		Matrix<3,1> qpos = augpos.subMatrix<3,1>(0,0);
-		Matrix<3,3> qcov = augpos.subMatrix<3,3>(0,0);
+		Matrix<3,3> qcov = augcov.subMatrix<3,3>(0,0);
 		DistanceToConstraints(augpos.subMatrix<3,1>(0,0), augcov.subMatrix<3,3>(0,0), qcvx, cal_obstacles, cal_environment, cal_point);
 
 		//compute the probablity of collision for this step.
 		double ps_c = 0;
 		int lencvx = (int)qcvx.size();
-		for(int c=0; c < lencvx; c++){
+		for(int c = 0; c < lencvx; c++){
 			Matrix<3,1> a = qcvx[c].first;
 			double b = qcvx[c].second;
-			double alpha = (b - tr(~a*qpos)) / sqrt(tr(~a*qcov*a));
+			double alpha = (b - tr(~a*qpos)) / (sqrt(tr(~a*qcov*a)) + 0.00001);
 			ps_c += (1 - cdf(alpha));
 		}
 		ps *= (1 - ps_c);
@@ -576,12 +578,12 @@ double LQGMP::EstimateAndTruncate(const Matrix<3,3> initialCov, const int& cal_o
 			double oldVar = tr(~aa*augcov*aa);
 			truncate(bb, oldMean, oldVar, newuniMean, newuniVar);
 			Matrix<6,1> xyCov = augcov * aa;
-			Matrix<6> L = xyCov / oldVar;
+			Matrix<6> L = xyCov / (oldVar + 0.00001);
 			pathlqg[i].y -= L*(oldMean - newuniMean);
 			pathlqg[i].R -= L*(oldVar - newuniVar) * (~L);
 		}
 
-		if( i < l - 1){
+		if(i < l - 1){
 			pathlqg[i+1].y = pathlqg[i].F * pathlqg[i].y;
 			pathlqg[i+1].R = pathlqg[i].F * pathlqg[i].R * (~pathlqg[i].F) + pathlqg[i].G * Q * (~pathlqg[i].G);
 		}
@@ -590,5 +592,13 @@ double LQGMP::EstimateAndTruncate(const Matrix<3,3> initialCov, const int& cal_o
 }
 
 
+void LQGMP::draw_truncate_distribution(const int& cal_trunc_ellipse){
 
+	for(int i = 0; i < (int)pathlqg.size(); i+=3){
+		Matrix<3> qdpos = pathlqg[i].T + pathlqg[i].y.subMatrix<3,1>(0,0);
+		Matrix<3,3> qtcov = pathlqg[i].R.subMatrix<3,3>(0,0);
+		drawEllipse3d(qdpos, qtcov, cal_trunc_ellipse, true);
+	}
+
+}
 

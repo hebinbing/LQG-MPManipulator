@@ -74,6 +74,7 @@ public:
 			length = 0;
 			objpoint = zeros<2,1>();
 			objid = -1;
+			distance = -1;
 			x = zeros<2,1>();
 			A = zeros<2,3>();
 			c = zeros<2,1>();
@@ -139,6 +140,7 @@ public:
 	bool check_contact_point(const std::vector<std::pair<Matrix<2>, double>>& cvx, const Matrix<2>& objpoint);
 	void DistanceToConstraints(const Matrix<3>& qpos, const Matrix<3,3>& qR, std::vector<std::pair<Matrix<3>, double>>& qcvx, const int& cal_obstacles, const int& cal_environment, const int& cal_point);
 	double EstimateAndTruncate(const Matrix<3,3> initialCov, const int& cal_obstacles, const int& cal_environment, const int& cal_point);
+	void draw_truncate_distribution(const int& cal_trunc_ellipse);
 };
 
 
